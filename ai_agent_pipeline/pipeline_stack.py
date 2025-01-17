@@ -10,23 +10,72 @@ from aws_cdk import (
     aws_batch as batch,
     aws_cloudwatch as cloudwatch,
     aws_iam as iam,
+    aws_ec2 as ec2,
     Duration,
     RemovalPolicy
 )
-
 
 class AiAgentPipelineStack(Stack):
     def __init__(self, scope: Construct, construct_id: str, **kwargs) -> None:
         super().__init__(scope, construct_id, **kwargs)
 
-        # Create CodeCommit repository
+        # Create VPC
+        vpc = ec2.Vpc(
+            self, "BatchVPC",
+            max_azs=2,
+            subnet_configuration=[
+                ec2.SubnetConfiguration(
+                    name="Public",
+                    subnet_type=ec2.SubnetType.PUBLIC,
+                    cidr_mask=24
+                ),
+                ec2.SubnetConfiguration(
+                    name="Private",
+                    subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS,
+                    cidr_mask=24
+                )
+            ]
+        )
+
+        # Create Security Group
+        security_group = ec2.SecurityGroup(
+            self, "BatchSecurityGroup",
+            vpc=vpc,
+            description="Security group for Batch compute environment",
+            allow_all_outbound=True
+        )
+
+        # Create IAM roles
+        batch_service_role = iam.Role(
+            self, "BatchServiceRole",
+            assumed_by=iam.ServicePrincipal("batch.amazonaws.com"),
+            managed_policies=[
+                iam.ManagedPolicy.from_aws_managed_policy_name("service-role/AWSBatchServiceRole")
+            ]
+        )
+
+        # Create instance profile for EC2 instances
+        batch_instance_role = iam.Role(
+            self, "BatchInstanceRole",
+            assumed_by=iam.ServicePrincipal("ec2.amazonaws.com"),
+            managed_policies=[
+                iam.ManagedPolicy.from_aws_managed_policy_name("service-role/AmazonEC2ContainerServiceforEC2Role")
+            ]
+        )
+
+        batch_instance_profile = iam.CfnInstanceProfile(
+            self, "BatchInstanceProfile",
+            roles=[batch_instance_role.role_name]
+        )
+
+        # Your existing repository creation
         repository = codecommit.Repository(
             self, "AiAgentRepo",
             repository_name="ai-agent-repository",
             description="Repository for AI Agent code"
         )
 
-        # Create S3 bucket for test cases and evaluations
+        # Your existing S3 bucket creation
         test_bucket = s3.Bucket(
             self, "TestBucket",
             versioned=True,
@@ -34,7 +83,7 @@ class AiAgentPipelineStack(Stack):
             removal_policy=RemovalPolicy.DESTROY
         )
 
-        # Create CodeBuild project
+        # Your existing build project
         build_project = codebuild.PipelineProject(
             self, "BuildProject",
             environment=codebuild.BuildEnvironment(
@@ -47,15 +96,41 @@ class AiAgentPipelineStack(Stack):
             }
         )
 
-        # Grant permissions to CodeBuild for Bedrock
+        # Grant Bedrock permissions
         build_project.role.add_to_policy(iam.PolicyStatement(
-            actions=[
-                "bedrock:*",
-            ],
+            actions=["bedrock:*"],
             resources=["*"]
         ))
 
-        # Create CodePipeline
+        # Create Batch compute environment with the new resources
+        compute_environment = batch.CfnComputeEnvironment(
+            self, "BatchCompute",
+            type="MANAGED",
+            compute_resources={
+                "type": "SPOT",
+                "maxvCpus": 16,
+                "minvCpus": 0,
+                "subnets": [subnet.subnet_id for subnet in vpc.private_subnets],
+                "securityGroupIds": [security_group.security_group_id],
+                "instanceTypes": ["optimal"],
+                "instanceRole": batch_instance_profile.attr_arn
+            },
+            service_role=batch_service_role.role_arn,
+            state="ENABLED"
+        )
+
+        # Create Batch job queue
+        job_queue = batch.CfnJobQueue(
+            self, "BatchQueue",
+            compute_environment_order=[{
+                "computeEnvironment": compute_environment.attr_compute_environment_arn,
+                "order": 1
+            }],
+            priority=1,
+            state="ENABLED"
+        )
+
+        # Your existing pipeline creation
         pipeline = codepipeline.Pipeline(
             self, "AiAgentPipeline",
             pipeline_name="ai-agent-pipeline"
@@ -90,7 +165,7 @@ class AiAgentPipelineStack(Stack):
             ]
         )
 
-        # Create Lambda functions for tools
+        # Your existing Lambda function
         tools_function = lambda_.Function(
             self, "ToolsFunction",
             runtime=lambda_.Runtime.PYTHON_3_9,
@@ -99,13 +174,12 @@ class AiAgentPipelineStack(Stack):
             timeout=Duration.minutes(5)
         )
 
-        # Create CloudWatch dashboard
+        # Your existing CloudWatch dashboard
         dashboard = cloudwatch.Dashboard(
             self, "AiAgentDashboard",
             dashboard_name="ai-agent-metrics"
         )
 
-        # Add metrics to dashboard
         dashboard.add_widgets(
             cloudwatch.GraphWidget(
                 title="Agent Invocations",
@@ -118,39 +192,4 @@ class AiAgentPipelineStack(Stack):
                 title="Agent Latency",
                 left=[tools_function.metric_duration()]
             )
-        )
-
-        # Create Batch compute environment and job queue
-        # compute_environment = batch.ComputeEnvironment(
-        #     self, "BatchCompute",
-        #     compute_resources=batch.ComputeResources(
-        #         type=batch.ComputeResourceType.SPOT,
-        #         min_vcpus=0,
-        #         max_vcpus=16
-        #     )
-        # )
-        compute_environment = batch.CfnComputeEnvironment(
-            self, "BatchCompute",
-            type="MANAGED",
-            compute_resources={
-                "type": "SPOT",  # or "EC2", "FARGATE", "FARGATE_SPOT"
-                "maxvCpus": 16,
-                "minvCpus": 0,
-                # "subnets": ["subnet-xxxxx"],  # Replace with your subnet IDs
-                # "securityGroupIds": ["sg-xxxxx"],  # Replace with your security group IDs
-                "instanceTypes": ["optimal"]  # or specific instance types like ["t3.micro"]
-                # "instanceRole": "your-instance-role-arn"  # Replace with your instance role ARN
-            },
-            # service_role="arn:aws:iam::account:role/service-role/AWSBatchServiceRole",  # Replace with your service role
-            state="ENABLED"
-        )
-
-        job_queue = batch.JobQueue(
-            self, "BatchQueue",
-            compute_environments=[
-                batch.JobQueueComputeEnvironment(
-                    compute_environment=compute_environment,
-                    order=1
-                )
-            ]
         )
