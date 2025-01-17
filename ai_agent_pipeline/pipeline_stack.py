@@ -62,6 +62,15 @@ class AiAgentPipelineStack(Stack):
                 iam.ManagedPolicy.from_aws_managed_policy_name("service-role/AmazonEC2ContainerServiceforEC2Role")
             ]
         )
+        # Add this after creating the other IAM roles
+        spot_fleet_role = iam.Role(
+            self, "SpotFleetRole",
+            assumed_by=iam.ServicePrincipal("spotfleet.amazonaws.com"),
+            managed_policies=[
+                iam.ManagedPolicy.from_aws_managed_policy_name("service-role/AmazonEC2SpotFleetTaggingRole")
+            ]
+        )
+
 
         batch_instance_profile = iam.CfnInstanceProfile(
             self, "BatchInstanceProfile",
@@ -113,7 +122,9 @@ class AiAgentPipelineStack(Stack):
                 "subnets": [subnet.subnet_id for subnet in vpc.private_subnets],
                 "securityGroupIds": [security_group.security_group_id],
                 "instanceTypes": ["optimal"],
-                "instanceRole": batch_instance_profile.attr_arn
+                "instanceRole": batch_instance_profile.attr_arn,
+                "spotIamFleetRole": spot_fleet_role.role_arn,  # Add this line
+                "bidPercentage": 60  # Optional: maximum percentage of On-Demand price to bid
             },
             service_role=batch_service_role.role_arn,
             state="ENABLED"
