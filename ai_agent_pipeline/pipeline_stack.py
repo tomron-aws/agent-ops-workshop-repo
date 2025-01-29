@@ -12,12 +12,23 @@ from aws_cdk import (
     aws_iam as iam,
     aws_ec2 as ec2,
     Duration,
-    RemovalPolicy
+    RemovalPolicy,
+    CfnResource,
+    CfnParameter
 )
 
 class AiAgentPipelineStack(Stack):
     def __init__(self, scope: Construct, construct_id: str, **kwargs) -> None:
         super().__init__(scope, construct_id, **kwargs)
+        #parameters
+        identity_center_arn = CfnParameter(
+            self, "IdentityCenterArn",
+            type="String",
+            description="The ARN of the IAM Identity Center instance",
+            default="",  # Empty string as default value
+            allowed_pattern="^$|^arn:[\\w-]+:sso:::instance/(sso)?ins-[a-zA-Z0-9-.]{16}$",  # Allows empty string or valid IAM Identity Center ARN
+            constraint_description="Must be a valid IAM Identity Center instance ARN or empty string"
+        )
 
         # Create VPC
         vpc = ec2.Vpc(
@@ -44,6 +55,85 @@ class AiAgentPipelineStack(Stack):
             description="Security group for Batch compute environment",
             allow_all_outbound=True
         )
+
+        # Create IAM role for Amazon Q
+        # q_service_role = iam.Role(
+        #     self, "QServiceRole",
+        #     assumed_by=iam.ServicePrincipal("qconnect.amazonaws.com"),
+        #     managed_policies=[
+        #         iam.ManagedPolicy.from_aws_managed_policy_name("AmazonQDeveloperAccess")
+        #     ]
+        # )
+
+        # Create Amazon Q Agent
+        q_agent = CfnResource(
+            self, "AIAgent",
+            type="AWS::QBusiness::Application",
+            properties={
+                "Description" : "AgentOps-QBiz-Instance Description",
+                "DisplayName" : "AgentOps-QBiz-Instance",
+                "IdentityCenterInstanceArn" : identity_center_arn.value_as_string
+            }
+        )
+
+        q_agent_index = CfnResource(
+            self, "AIAgentIndex",
+            type="AWS::QBusiness::Index",
+            properties={
+                "ApplicationId" : q_agent.ref,
+                "DisplayName" : "q_agent_index",
+            }
+        )
+
+        # # amazonq-ignore-next-line
+        # data_source_bucket = s3.Bucket(
+        #     self, "DataSourceBucket",
+        #     bucket_name="agentops-qbiz-datasource",
+        #     versioned=True,
+        #     encryption=s3.BucketEncryption.S3_MANAGED,
+        #     removal_policy=RemovalPolicy.DESTROY
+        # )
+
+        # q_agent_s3_data_source = CfnResource(
+        #     self, "AIAgentDataSource",
+        #     type="AWS::QBusiness::DataSource",
+        #     properties={
+        #         "ApplicationId" : q_agent.ref,
+        #         "DisplayName" : "S3-Data-Source",
+        #         "IndexId" : {
+        #             "Fn::GetAtt": [q_agent.logical_id, "IndexId"]
+        #         },
+        #         "Configuration": {
+        #             "type": "S3",
+        #             "syncMode": "FULL_CRAWL",
+        #             "connectionConfiguration": {
+        #                 "repositoryEndpointMetadata": {
+        #                 "BucketName": data_source_bucket.bucket_name
+        #                 }
+        #             },
+        #             "repositoryConfigurations": {
+        #                 "document": {
+        #                 "fieldMappings": [
+        #                     {
+        #                     "dataSourceFieldName": "content",
+        #                     "indexFieldName": "document_content",
+        #                     "indexFieldType": "STRING"
+        #                     }
+        #                 ]
+        #                 }
+        #             },
+        #             "additionalProperties": {
+        #                 "inclusionPatterns": [],
+        #                 "exclusionPatterns": [],
+        #                 "inclusionPrefixes": [],
+        #                 "exclusionPrefixes": [],
+        #                 "aclConfigurationFilePath": "/configs/acl.json",
+        #                 "metadataFilesPrefix": "/metadata/",
+        #                 "maxFileSizeInMegaBytes": "50"
+        #             }
+        #         }
+        #     }
+        # )
 
         # Create IAM roles
         batch_service_role = iam.Role(
