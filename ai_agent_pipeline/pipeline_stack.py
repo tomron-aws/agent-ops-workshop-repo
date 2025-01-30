@@ -66,13 +66,15 @@ class AiAgentPipelineStack(Stack):
         # )
 
         # Create Amazon Q Agent
+        #ToDo: We will eventualy need to create a role for this as the default can't be edited
         q_agent = CfnResource(
             self, "AIAgent",
             type="AWS::QBusiness::Application",
             properties={
                 "Description" : "AgentOps-QBiz-Instance Description",
                 "DisplayName" : "AgentOps-QBiz-Instance",
-                "IdentityCenterInstanceArn" : identity_center_arn.value_as_string
+                "IdentityCenterInstanceArn" : identity_center_arn.value_as_string,
+                "RoleArn": "arn:aws:iam::239122513475:role/service-role/QBusiness-Application-9iqmk"
             }
         )
 
@@ -85,55 +87,94 @@ class AiAgentPipelineStack(Stack):
             }
         )
 
-        # # amazonq-ignore-next-line
-        # data_source_bucket = s3.Bucket(
-        #     self, "DataSourceBucket",
-        #     bucket_name="agentops-qbiz-datasource",
-        #     versioned=True,
-        #     encryption=s3.BucketEncryption.S3_MANAGED,
-        #     removal_policy=RemovalPolicy.DESTROY
-        # )
+        q_agent_retriever = CfnResource(
+            self, "AIAgentRetriever",
+            type="AWS::QBusiness::Retriever",
+            properties={
+                "ApplicationId" : q_agent.ref,
+                "Configuration" : {
+                    "NativeIndexConfiguration" : {
+                        "IndexId" : {
+                            "Fn::GetAtt": [q_agent_index.logical_id, "IndexId"]
+                        }
+                    },
+                },
+                "DisplayName" : "q_agent_retriever",
+                "Type" : "NATIVE_INDEX"
+            }
+        )
 
-        # q_agent_s3_data_source = CfnResource(
-        #     self, "AIAgentDataSource",
-        #     type="AWS::QBusiness::DataSource",
-        #     properties={
-        #         "ApplicationId" : q_agent.ref,
-        #         "DisplayName" : "S3-Data-Source",
-        #         "IndexId" : {
-        #             "Fn::GetAtt": [q_agent.logical_id, "IndexId"]
-        #         },
-        #         "Configuration": {
-        #             "type": "S3",
-        #             "syncMode": "FULL_CRAWL",
-        #             "connectionConfiguration": {
-        #                 "repositoryEndpointMetadata": {
-        #                 "BucketName": data_source_bucket.bucket_name
-        #                 }
-        #             },
-        #             "repositoryConfigurations": {
-        #                 "document": {
-        #                 "fieldMappings": [
-        #                     {
-        #                     "dataSourceFieldName": "content",
-        #                     "indexFieldName": "document_content",
-        #                     "indexFieldType": "STRING"
-        #                     }
-        #                 ]
-        #                 }
-        #             },
-        #             "additionalProperties": {
-        #                 "inclusionPatterns": [],
-        #                 "exclusionPatterns": [],
-        #                 "inclusionPrefixes": [],
-        #                 "exclusionPrefixes": [],
-        #                 "aclConfigurationFilePath": "/configs/acl.json",
-        #                 "metadataFilesPrefix": "/metadata/",
-        #                 "maxFileSizeInMegaBytes": "50"
-        #             }
-        #         }
-        #     }
-        # )
+        # amazonq-ignore-next-line
+        data_source_bucket = s3.Bucket(
+            self, "DataSourceBucket",
+            bucket_name="agentops-qbiz-datasource",
+            versioned=True,
+            encryption=s3.BucketEncryption.S3_MANAGED,
+            removal_policy=RemovalPolicy.DESTROY
+        )
+
+        # Create IAM role for QBusiness
+        qbusiness_s3_datasource_role = iam.Role(
+            self, "QBusinessServiceRole",
+            assumed_by=iam.ServicePrincipal("qbusiness.amazonaws.com"),
+            description="Role for QBusiness to access S3 data source"
+        )
+
+        # Add permissions to access the S3 bucket
+        qbusiness_s3_datasource_role.add_to_policy(iam.PolicyStatement(
+            actions=[
+                "s3:GetObject",
+                "s3:ListBucket",
+                "s3:GetBucketLocation"
+            ],
+            resources=[
+                data_source_bucket.bucket_arn,
+                f"{data_source_bucket.bucket_arn}/*"
+            ]
+        ))
+
+
+        q_agent_s3_data_source = CfnResource(
+            self, "AIAgentDataSource",
+            type="AWS::QBusiness::DataSource",
+            properties={
+                "ApplicationId" : q_agent.ref,
+                "DisplayName" : "S3-Data-Source",
+                "IndexId" : {
+                    "Fn::GetAtt": [q_agent_index.logical_id, "IndexId"]
+                },
+                "RoleArn": qbusiness_s3_datasource_role.role_arn,  # Add this line
+                "Configuration": {
+                    "type": "S3",
+                    "syncMode": "FULL_CRAWL",
+                    "connectionConfiguration": {
+                        "repositoryEndpointMetadata": {
+                        "BucketName": data_source_bucket.bucket_name
+                        }
+                    },
+                    "repositoryConfigurations": {
+                        "document": {
+                        "fieldMappings": [
+                            {
+                            "dataSourceFieldName": "content",
+                            "indexFieldName": "document_content",
+                            "indexFieldType": "STRING"
+                            }
+                        ]
+                        }
+                    },
+                    "additionalProperties": {
+                        "inclusionPatterns": [],
+                        "exclusionPatterns": [],
+                        "inclusionPrefixes": [],
+                        "exclusionPrefixes": [],
+                        "aclConfigurationFilePath": "/configs/acl.json",
+                        "metadataFilesPrefix": "/metadata/",
+                        "maxFileSizeInMegaBytes": "50"
+                    }
+                }
+            }
+        )
 
         # Create IAM roles
         batch_service_role = iam.Role(
