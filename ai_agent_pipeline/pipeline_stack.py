@@ -1,4 +1,6 @@
 from constructs import Construct
+import os
+
 from aws_cdk import (
     Stack,
     aws_codecommit as codecommit,
@@ -11,6 +13,7 @@ from aws_cdk import (
     aws_cloudwatch as cloudwatch,
     aws_iam as iam,
     aws_ec2 as ec2,
+    aws_s3_deployment as s3deploy,
     Duration,
     RemovalPolicy,
     CfnResource,
@@ -30,6 +33,8 @@ class AiAgentPipelineStack(Stack):
             allowed_pattern="^$|^arn:[\\w-]+:sso:::instance/(sso)?ins-[a-zA-Z0-9-.]{16}$",  # Allows empty string or valid IAM Identity Center ARN
             constraint_description="Must be a valid IAM Identity Center instance ARN or empty string"
         )
+
+        __dirname = os.path.dirname(os.path.realpath(__file__))
 
         # Create VPC
         vpc = ec2.Vpc(
@@ -411,27 +416,39 @@ class AiAgentPipelineStack(Stack):
         )
 
         # Your existing S3 bucket creation
-        test_bucket = s3.Bucket(
-            self, "TestBucket",
+        buildspec_bucket = s3.Bucket(
+            self, "BuildspecBucket",
             versioned=True,
             encryption=s3.BucketEncryption.S3_MANAGED,
-            removal_policy=RemovalPolicy.DESTROY
+            removal_policy=RemovalPolicy.DESTROY,
+            enforce_ssl=True
+        )
+
+        # Copy the asset to the buildspec bucket
+        deployment = s3deploy.BucketDeployment(self, "DeployFiles",
+            sources=[s3deploy.Source.asset(f"{__dirname}/../ai_agent_pipeline/assets/")],
+            destination_bucket=buildspec_bucket
         )
 
         # Your existing build project
-        build_project = codebuild.PipelineProject(
+        build_project = codebuild.Project(
             self, "BuildProject",
             environment=codebuild.BuildEnvironment(
                 build_image=codebuild.LinuxBuildImage.STANDARD_5_0
             ),
-            build_spec=codebuild.BuildSpec.from_source_filename('buildspec.yml'),
+            source=codebuild.Source.s3(
+                bucket=buildspec_bucket,
+                path=""
+            ),
             environment_variables={
                 "TEST_BUCKET": codebuild.BuildEnvironmentVariable(
-                    value=test_bucket.bucket_name
+                    value=buildspec_bucket.bucket_name
                 )
             }
         )
 
+        buildspec_bucket.grant_read(build_project)
+        buildspec_bucket.grant_read(build_project)
         # Grant Bedrock permissions
         build_project.role.add_to_policy(iam.PolicyStatement(
             actions=["bedrock:*"],
