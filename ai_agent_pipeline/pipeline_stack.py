@@ -376,6 +376,87 @@ class AiAgentPipelineStack(Stack):
             }
         )
 
+        # Create IAM role for Q Business Web Experience
+        web_experience_role = iam.Role(
+            self, "QBusinessWebExperienceRole",
+            assumed_by=iam.ServicePrincipal("qbusiness.amazonaws.com"),
+            description="Role for Q Business Web Experience"
+        )
+
+        # Add trust relationship conditions
+        web_experience_role.assume_role_policy.add_statements(
+            iam.PolicyStatement(
+                effect=iam.Effect.ALLOW,
+                principals=[iam.ServicePrincipal("qbusiness.amazonaws.com")],
+                actions=["sts:AssumeRole"],
+                conditions={
+                    "StringEquals": {
+                        "aws:SourceAccount": Stack.of(self).account
+                    },
+                    "ArnLike": {
+                        "aws:SourceArn": f"arn:aws:qbusiness:{Stack.of(self).region}:{Stack.of(self).account}:application/{q_agent.ref}"
+                    }
+                }
+            )
+        )
+
+        # Add required permissions for web experience with IAM Identity Center
+        web_experience_role.add_to_policy(
+            iam.PolicyStatement(
+                effect=iam.Effect.ALLOW,
+                actions=[
+                    "qbusiness:Chat",
+                    "qbusiness:ChatSync",
+                    "qbusiness:ListMessages",
+                    "qbusiness:ListConversations",
+                    "qbusiness:PutFeedback",
+                    "qbusiness:DeleteConversation",
+                    "qbusiness:GetWebExperience",
+                    "qbusiness:GetApplication",
+                    "qbusiness:ListPlugins",
+                    "qbusiness:ListPluginActions",
+                    "qbusiness:GetChatControlsConfiguration",
+                    "qbusiness:ListRetrievers",
+                    "qbusiness:ListAttachments",
+                    "qbusiness:GetMedia"
+                ],
+                resources=[f"arn:aws:qbusiness:{Stack.of(self).region}:{Stack.of(self).account}:application/{q_agent.ref}"]
+            )
+        )
+
+        # Add plugin discovery permissions
+        web_experience_role.add_to_policy(
+            iam.PolicyStatement(
+                effect=iam.Effect.ALLOW,
+                actions=[
+                    "qbusiness:ListPluginTypeMetadata",
+                    "qbusiness:ListPluginTypeActions"
+                ],
+                resources=["*"]
+            )
+        )
+
+        # Add retriever permissions
+        web_experience_role.add_to_policy(
+            iam.PolicyStatement(
+                effect=iam.Effect.ALLOW,
+                actions=["qbusiness:GetRetriever"],
+                resources=[
+                    f"arn:aws:qbusiness:{Stack.of(self).region}:{Stack.of(self).account}:application/{q_agent.ref}",
+                    f"arn:aws:qbusiness:{Stack.of(self).region}:{Stack.of(self).account}:application/{q_agent.ref}/retriever/*"
+                ]
+            )
+        )
+        # Create Web Experience for Q Business application
+        q_agent_web_experience = CfnResource(
+            self, "AIAgentWebExperience",
+            type="AWS::QBusiness::WebExperience",
+            properties={
+                "ApplicationId": q_agent.ref,
+                "RoleArn": web_experience_role.role_arn
+            }
+        )
+
         # Create IAM roles
         batch_service_role = iam.Role(
             self, "BatchServiceRole",
