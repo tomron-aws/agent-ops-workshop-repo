@@ -14,7 +14,8 @@ from aws_cdk import (
     Duration,
     RemovalPolicy,
     CfnResource,
-    CfnParameter
+    CfnParameter,
+    CfnOutput
 )
 
 class AiAgentPipelineStack(Stack):
@@ -55,6 +56,49 @@ class AiAgentPipelineStack(Stack):
             description="Security group for Batch compute environment",
             allow_all_outbound=True
         )
+        #Create bedrock agents for testing
+        # Create IAM role for the agents
+        agent_role = iam.Role(
+            self, "BedrockAgentRole",
+            assumed_by=iam.ServicePrincipal("bedrock.amazonaws.com"),
+            description="IAM role for Bedrock agents"
+        )
+
+        # Add required policies to the role
+        agent_role.add_managed_policy(
+            iam.ManagedPolicy.from_aws_managed_policy_name("AmazonBedrockFullAccess")
+        )
+
+        # Create the first agent using CfnAgent
+        bedrock_agent_test = CfnResource(
+            self, "TestAgent",
+            type="AWS::Bedrock::Agent",
+            properties={
+                "AgentName": "ContentCreatorAgent",
+                "AgentResourceRoleArn": agent_role.role_arn,
+                "FoundationModel": "anthropic.claude-3-sonnet-20240229-v1:0",
+                "Instruction": "You are an agent that tests other Bedrock agents for Quality Assurance.",
+                "Description": "Agent specialized in content creation",
+                "IdleSessionTTLInSeconds": 1800
+            }
+        )
+
+        bedrock_agent_functional = CfnResource(
+            self, "FunctionalAgent",
+            type="AWS::Bedrock::Agent",
+            properties={
+                "AgentName": "DataAnalystAgent",
+                "AgentResourceRoleArn": agent_role.role_arn,
+                "FoundationModel": "anthropic.claude-3-sonnet-20240229-v1:0",
+                "Instruction": "You are a travel agent. You assist customers in booking and modifying flights",
+                "Description": "Agent specialized in flight booking",
+                "IdleSessionTTLInSeconds": 1800
+            }
+        )
+
+        # Output the agent IDs
+        CfnOutput(self, "FirstAgentId", value=bedrock_agent_test.ref)
+        CfnOutput(self, "SecondAgentId", value=bedrock_agent_functional.ref)
 
         # Create IAM role for Amazon Q
         # q_service_role = iam.Role(
