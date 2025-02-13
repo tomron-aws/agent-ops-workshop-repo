@@ -14,11 +14,13 @@ from aws_cdk import (
     aws_iam as iam,
     aws_ec2 as ec2,
     aws_s3_deployment as s3deploy,
+    aws_apigateway as aws_apigateway,
     Duration,
     RemovalPolicy,
     CfnResource,
     CfnParameter,
-    CfnOutput
+    CfnOutput,
+    Token
 )
 
 class AiAgentPipelineStack(Stack):
@@ -92,289 +94,321 @@ class AiAgentPipelineStack(Stack):
             self, "FunctionalAgent",
             type="AWS::Bedrock::Agent",
             properties={
-                "AgentName": "DataAnalystAgent",
+                "AgentName": "ElectronicsManufacturingExpert",
                 "AgentResourceRoleArn": agent_role.role_arn,
                 "FoundationModel": "anthropic.claude-3-sonnet-20240229-v1:0",
-                "Instruction": "You are a travel agent. You assist customers in booking and modifying flights",
-                "Description": "Agent specialized in flight booking",
+                "Instruction": """You are an Electronics Manufacturing Expert Agent specializing in electronic component manufacturing, assembly processes, and quality control. 
+
+                    Core Knowledge Areas:
+
+                    1. Manufacturing Processes:
+                    - PCB fabrication and assembly techniques
+                    - Surface-mount technology (SMT) and through-hole assembly
+                    - Soldering standards and best practices
+                    - Clean room protocols and requirements
+                    - Production line optimization
+
+                    2. Electronic Components:
+                    - Component specifications and tolerances
+                    - Parts selection and compatibility
+                    - Component lifecycle management
+                    - Inventory control best practices
+                    - Component obsolescence management
+
+                    3. Quality Control:
+                    - IPC standards implementation
+                    - Testing procedures (ICT, FCT, AOI)
+                    - Defect analysis and prevention
+                    - Statistical process control (SPC)
+                    - Reliability testing methods
+
+                    4. Industry Standards:
+                    - IPC standards (IPC-A-610, IPC-J-STD-001)
+                    - ISO 9001 requirements
+                    - ESD protection protocols
+                    - RoHS and REACH compliance
+                    - Industry 4.0 implementation
+
+                    Response Guidelines:
+                    - Provide specific technical details and parameters when discussing processes
+                    - Include relevant industry standards and compliance requirements
+                    - Emphasize quality control checkpoints and testing procedures
+                    - Consider manufacturability and scalability in recommendations
+                    - Reference appropriate safety protocols and environmental compliance
+
+                    When responding to queries:
+                    1. First assess the specific manufacturing context
+                    2. Consider applicable industry standards
+                    3. Provide detailed technical specifications
+                    4. Include quality control requirements
+                    5. Note any relevant compliance considerations
+
+                    Always maintain focus on:
+                    - Manufacturing quality and reliability
+                    - Process efficiency and optimization
+                    - Industry standard compliance
+                    - Safety and environmental regulations
+                    - Cost-effective solutions while maintaining quality standards""",
+                "Description": "Expert system for electronics manufacturing processes, quality control, and industry standards compliance",
                 "IdleSessionTTLInSeconds": 1800
+            }
+        )
+        bedrock_agent_functional_alias = CfnResource(
+            self, "FunctionalAgentAlias",
+            type="AWS::Bedrock::AgentAlias",
+            properties={
+                "AgentId": bedrock_agent_functional.ref,
+                "AgentAliasName": "latest"
             }
         )
 
         # Output the agent IDs
         CfnOutput(self, "FirstAgentId", value=bedrock_agent_test.ref)
-        CfnOutput(self, "SecondAgentId", value=bedrock_agent_functional.ref)
+        CfnOutput(self, "FunctionalAgentId", value=bedrock_agent_functional.ref)
 
-        # Create IAM role for Amazon Q
-        # q_service_role = iam.Role(
-        #     self, "QServiceRole",
-        #     assumed_by=iam.ServicePrincipal("qconnect.amazonaws.com"),
-        #     managed_policies=[
-        #         iam.ManagedPolicy.from_aws_managed_policy_name("AmazonQDeveloperAccess")
-        #     ]
+        #Create Lambda Function to Integrate with API Gateway
+        # Create IAM role for Lambda with Bedrock permissions - Leave commented until ready to use
+        # bedrock_lambda_role = iam.Role(
+        #     self, 'BedrockLambdaRole',
+        #     assumed_by=iam.ServicePrincipal('lambda.amazonaws.com')
         # )
 
-        # Create Amazon Q Agent
+        # Add Bedrock permissions - Leave commented until ready to use
+        # bedrock_lambda_role.add_to_policy(iam.PolicyStatement(
+        #     effect=iam.Effect.ALLOW,
+        #     actions=[
+        #         'bedrock:InvokeModel',
+        #         'bedrock:InvokeAgent'  # Add this permission
+        #     ],
+        #     resources=['*']
+        # ))
+
+        # Basic Lambda CloudWatch permissions - Leave commented until ready to use
+        # bedrock_lambda_role.add_managed_policy(
+        #     iam.ManagedPolicy.from_aws_managed_policy_name('service-role/AWSLambdaBasicExecutionRole')
+        # )
+
+        # Create Lambda function for Bedrock integration - Leave commented until ready to use
+        # bedrock_lambda = lambda_.Function(
+        #     self, 'BedrockLambdaFunction',
+        #     runtime=lambda_.Runtime.PYTHON_3_9,
+        #     handler='index.handler',
+        #     code=lambda_.Code.from_asset('lambda/tools'),
+        #     timeout=Duration.minutes(5),
+        #     memory_size=256,
+        #     role=bedrock_lambda_role,
+        #     environment={
+        #         'POWERTOOLS_SERVICE_NAME': 'bedrock-api',
+        #         'LOG_LEVEL': 'INFO',
+        #         'BEDROCK_AGENT_ID': bedrock_agent_functional.ref,
+        #         'BEDROCK_AGENT_ALIAS_ID': Token.as_string(bedrock_agent_functional_alias.get_att("AgentAliasId"))
+        #     }
+        # )
+        # Create API Gateway REST API - Leave commented until ready to use
+        # api = aws_apigateway.RestApi(
+        #     self, 'BedrockApi',
+        #     rest_api_name='Bedrock Integration API',
+        #     description='API Gateway integration with Amazon Bedrock',
+        #     # policy=api_resource_policy
+        # )
+
+        # Create API Gateway integration with Lambda - Leave commented until ready to use
+        # integration = aws_apigateway.LambdaIntegration(
+        #     bedrock_lambda,
+        #     proxy=True,
+        #     integration_responses=[{
+        #         'statusCode': '200',
+        #         'responseParameters': {
+        #             'method.response.header.Access-Control-Allow-Origin': "'*'"
+        #         }
+        #     }]
+        # )
+
+        # Add POST method to API Gateway - Leave commented until ready to use
+        # api_resource = api.root.add_resource('invoke')
+        # api_resource.add_method(
+        #     'POST',
+        #     integration,
+        #     method_responses=[{
+        #         'statusCode': '200',
+        #         'responseParameters': {
+        #             'method.response.header.Access-Control-Allow-Origin': True
+        #         }
+        #     }]
+        # )
+
+        # Enable CORS - Leave commented until ready to use
+        # api_resource.add_cors_preflight(
+        #     allow_origins=['*'],
+        #     allow_methods=['POST'],
+        #     allow_headers=['Content-Type', 'Authorization']
+        # )
+
+        # Output the API endpoint URL - Leave commented until ready to use
+        # CfnOutput(
+        #     self, 'ApiEndpoint',
+        #     value=f'{api.url}invoke',
+        #     description='API Gateway endpoint URL'
+        # )
+
+        #Import Amazon Q
+        
+        # Import Amazon Q Agent
         #ToDo: We will eventualy need to create a role for this as the default can't be edited
-        q_agent = CfnResource(
-            self, "AIAgent",
-            type="AWS::QBusiness::Application",
-            properties={
-                "Description" : "AgentOps-QBiz-Instance Description",
-                "DisplayName" : "AgentOps-QBiz-Instance",
-                "IdentityCenterInstanceArn" : identity_center_arn.value_as_string,
-                "RoleArn": "arn:aws:iam::239122513475:role/service-role/QBusiness-Application-9iqmk"
-            }
-        )
-
-        q_agent_index = CfnResource(
-            self, "AIAgentIndex",
-            type="AWS::QBusiness::Index",
-            properties={
-                "ApplicationId" : q_agent.ref,
-                "DisplayName" : "q_agent_index",
-            }
-        )
-
-        q_agent_retriever = CfnResource(
-            self, "AIAgentRetriever",
-            type="AWS::QBusiness::Retriever",
-            properties={
-                "ApplicationId" : q_agent.ref,
-                "Configuration" : {
-                    "NativeIndexConfiguration" : {
-                        "IndexId" : {
-                            "Fn::GetAtt": [q_agent_index.logical_id, "IndexId"]
-                        }
-                    },
-                },
-                "DisplayName" : "q_agent_retriever",
-                "Type" : "NATIVE_INDEX"
-            }
-        )
-
-        # amazonq-ignore-next-line
-        data_source_bucket = s3.Bucket(
-            self, "DataSourceBucket",
-            bucket_name="agentops-qbiz-datasource",
-            versioned=True,
-            encryption=s3.BucketEncryption.S3_MANAGED,
-            removal_policy=RemovalPolicy.DESTROY
-        )
-
-        # Create IAM role for QBusiness
-        qbusiness_s3_datasource_role = iam.Role(
-            self, "QBusinessServiceRole",
-            assumed_by=iam.ServicePrincipal("qbusiness.amazonaws.com"),
-            description="Role for QBusiness to access S3 data source"
-        )
-
-        # Add permissions to access the S3 bucket
-        qbusiness_s3_datasource_role.add_to_policy(iam.PolicyStatement(
-            actions=[
-                "s3:GetObject",
-                "s3:ListBucket",
-                "s3:GetBucketLocation"
-            ],
-            resources=[
-                data_source_bucket.bucket_arn,
-                f"{data_source_bucket.bucket_arn}/*"
-            ]
-        ))
 
 
-        q_agent_s3_data_source = CfnResource(
-            self, "AIAgentDataSource",
-            type="AWS::QBusiness::DataSource",
-            properties={
-                "ApplicationId" : q_agent.ref,
-                "DisplayName" : "S3-Data-Source",
-                "IndexId" : {
-                    "Fn::GetAtt": [q_agent_index.logical_id, "IndexId"]
-                },
-                "RoleArn": qbusiness_s3_datasource_role.role_arn,  # Add this line
-                "Configuration": {
-                    "type": "S3",
-                    "syncMode": "FULL_CRAWL",
-                    "connectionConfiguration": {
-                        "repositoryEndpointMetadata": {
-                        "BucketName": data_source_bucket.bucket_name
-                        }
-                    },
-                    "repositoryConfigurations": {
-                        "document": {
-                        "fieldMappings": [
-                            {
-                            "dataSourceFieldName": "content",
-                            "indexFieldName": "document_content",
-                            "indexFieldType": "STRING"
-                            }
-                        ]
-                        }
-                    },
-                    "additionalProperties": {
-                        "inclusionPatterns": [],
-                        "exclusionPatterns": [],
-                        "inclusionPrefixes": [],
-                        "exclusionPrefixes": [],
-                        "aclConfigurationFilePath": "/configs/acl.json",
-                        "metadataFilesPrefix": "/metadata/",
-                        "maxFileSizeInMegaBytes": "50"
-                    }
-                }
-            }
-        )
-        q_agent_plugin = CfnResource(
-            self, "AIAgentPlugin",
-            type="AWS::QBusiness::Plugin",
-            properties={
-                "ApplicationId" : q_agent.ref,
-                "AuthConfiguration" : {
-                    "NoAuthConfiguration": {}
-                },
-                "CustomPluginConfiguration" : {
-                    "ApiSchema" : {
+        
+        # q_agent_plugin = CfnResource(
+        #     self, "AIAgentPlugin",
+        #     type="AWS::QBusiness::Plugin",
+        #     properties={
+        #         "ApplicationId" : q_agent.ref,
+        #         "AuthConfiguration" : {
+        #             "NoAuthConfiguration": {}
+        #         },
+        #         "CustomPluginConfiguration" : {
+        #             "ApiSchema" : {
                         
-                        "Payload" : """{
-                            "openapi": "3.0.0",
-                            "info": {
-                                "title": "FastAPI",
-                                "version": "0.1.0"
-                            },
-                            "servers": [
-                                {
-                                "url": "https://dj3a2w5zbcgq8.cloudfront.net"
-                                }
-                            ],
-                            "paths": {
-                                "/api/chat/": {
-                                "post": {
-                                    "tags": [
-                                    "chat_router"
-                                    ],
-                                    "summary": "Chat",
-                                    "description": "This API is used by a Financial Analyst  to provide clients' financial goals, stock information and S&P 500 and DOW Jones reqlated queries.The API interacts with SearchClient, ClientList, ClientDetail, StockInfo, Index_Tickers, GoalServicePopularGoals",
-                                    "operationId": "chat_api_chat__post",
-                                    "requestBody": {
-                                    "content": {
-                                        "application/json": {
-                                        "schema": {
-                                            "$ref": "#/components/schemas/ChatRequest"
-                                        }
-                                        }
-                                    },
-                                    "required": true
-                                    },
-                                    "responses": {
-                                    "200": {
-                                        "description": "Successful Response",
-                                        "content": {
-                                        "application/json": {
-                                            "schema": {
-                                            "$ref": "#/components/schemas/ChatResponse"
-                                            }
-                                        }
-                                        }
-                                    },
-                                    "422": {
-                                        "description": "Validation Error",
-                                        "content": {
-                                        "application/json": {
-                                            "schema": {
-                                            "$ref": "#/components/schemas/HTTPValidationError"
-                                            }
-                                        }
-                                        }
-                                    }
-                                    }
-                                }
-                                }
-                            },
-                            "components": {
-                                "schemas": {
-                                "ChatRequest": {
-                                    "type": "object",
-                                    "title": "ChatRequest",
-                                    "properties": {
-                                    "prompt": {
-                                        "type": "string",
-                                        "title": "Prompt"
-                                    }
-                                    },
-                                    "required": [
-                                    "prompt"
-                                    ]
-                                },
-                                "ChatResponse": {
-                                    "type": "object",
-                                    "title": "ChatResponse",
-                                    "properties": {
-                                    "response": {
-                                        "type": "string",
-                                        "title": "Response"
-                                    }
-                                    },
-                                    "required": [
-                                    "response"
-                                    ]
-                                },
-                                "HTTPValidationError": {
-                                    "type": "object",
-                                    "title": "HTTPValidationError",
-                                    "properties": {
-                                    "detail": {
-                                        "type": "array",
-                                        "title": "Detail",
-                                        "items": {
-                                        "$ref": "#/components/schemas/ValidationError"
-                                        }
-                                    }
-                                    }
-                                },
-                                "ValidationError": {
-                                    "type": "object",
-                                    "title": "ValidationError",
-                                    "properties": {
-                                    "loc": {
-                                        "type": "array",
-                                        "title": "Location",
-                                        "items": {
-                                        "anyOf": [
-                                            {
-                                            "type": "string"
-                                            },
-                                            {
-                                            "type": "integer"
-                                            }
-                                        ]
-                                        }
-                                    },
-                                    "msg": {
-                                        "type": "string",
-                                        "title": "Message"
-                                    },
-                                    "type": {
-                                        "type": "string",
-                                        "title": "Error Type"
-                                    }
-                                    },
-                                    "required": [
-                                    "loc",
-                                    "msg",
-                                    "type"
-                                    ]
-                                }
-                                }
-                            }
-                            }"""
-                    },
-                    "ApiSchemaType" : "OPEN_API_V3",
-                    "Description" : "plugin description"
-                },
-                "DisplayName" : "q-biz-plugin",
-                "Type" : "CUSTOM"
-            }
-        )
+        #                 "Payload" : """{
+        #                     "openapi": "3.0.0",
+        #                     "info": {
+        #                         "title": "FastAPI",
+        #                         "version": "0.1.0"
+        #                     },
+        #                     "servers": [
+        #                         {
+        #                         "url": "https://dj3a2w5zbcgq8.cloudfront.net"
+        #                         }
+        #                     ],
+        #                     "paths": {
+        #                         "/api/chat/": {
+        #                         "post": {
+        #                             "tags": [
+        #                             "chat_router"
+        #                             ],
+        #                             "summary": "Chat",
+        #                             "description": "This API is used by a Financial Analyst  to provide clients' financial goals, stock information and S&P 500 and DOW Jones reqlated queries.The API interacts with SearchClient, ClientList, ClientDetail, StockInfo, Index_Tickers, GoalServicePopularGoals",
+        #                             "operationId": "chat_api_chat__post",
+        #                             "requestBody": {
+        #                             "content": {
+        #                                 "application/json": {
+        #                                 "schema": {
+        #                                     "$ref": "#/components/schemas/ChatRequest"
+        #                                 }
+        #                                 }
+        #                             },
+        #                             "required": true
+        #                             },
+        #                             "responses": {
+        #                             "200": {
+        #                                 "description": "Successful Response",
+        #                                 "content": {
+        #                                 "application/json": {
+        #                                     "schema": {
+        #                                     "$ref": "#/components/schemas/ChatResponse"
+        #                                     }
+        #                                 }
+        #                                 }
+        #                             },
+        #                             "422": {
+        #                                 "description": "Validation Error",
+        #                                 "content": {
+        #                                 "application/json": {
+        #                                     "schema": {
+        #                                     "$ref": "#/components/schemas/HTTPValidationError"
+        #                                     }
+        #                                 }
+        #                                 }
+        #                             }
+        #                             }
+        #                         }
+        #                         }
+        #                     },
+        #                     "components": {
+        #                         "schemas": {
+        #                         "ChatRequest": {
+        #                             "type": "object",
+        #                             "title": "ChatRequest",
+        #                             "properties": {
+        #                             "prompt": {
+        #                                 "type": "string",
+        #                                 "title": "Prompt"
+        #                             }
+        #                             },
+        #                             "required": [
+        #                             "prompt"
+        #                             ]
+        #                         },
+        #                         "ChatResponse": {
+        #                             "type": "object",
+        #                             "title": "ChatResponse",
+        #                             "properties": {
+        #                             "response": {
+        #                                 "type": "string",
+        #                                 "title": "Response"
+        #                             }
+        #                             },
+        #                             "required": [
+        #                             "response"
+        #                             ]
+        #                         },
+        #                         "HTTPValidationError": {
+        #                             "type": "object",
+        #                             "title": "HTTPValidationError",
+        #                             "properties": {
+        #                             "detail": {
+        #                                 "type": "array",
+        #                                 "title": "Detail",
+        #                                 "items": {
+        #                                 "$ref": "#/components/schemas/ValidationError"
+        #                                 }
+        #                             }
+        #                             }
+        #                         },
+        #                         "ValidationError": {
+        #                             "type": "object",
+        #                             "title": "ValidationError",
+        #                             "properties": {
+        #                             "loc": {
+        #                                 "type": "array",
+        #                                 "title": "Location",
+        #                                 "items": {
+        #                                 "anyOf": [
+        #                                     {
+        #                                     "type": "string"
+        #                                     },
+        #                                     {
+        #                                     "type": "integer"
+        #                                     }
+        #                                 ]
+        #                                 }
+        #                             },
+        #                             "msg": {
+        #                                 "type": "string",
+        #                                 "title": "Message"
+        #                             },
+        #                             "type": {
+        #                                 "type": "string",
+        #                                 "title": "Error Type"
+        #                             }
+        #                             },
+        #                             "required": [
+        #                             "loc",
+        #                             "msg",
+        #                             "type"
+        #                             ]
+        #                         }
+        #                         }
+        #                     }
+        #                     }"""
+        #             },
+        #             "ApiSchemaType" : "OPEN_API_V3",
+        #             "Description" : "plugin description"
+        #         },
+        #         "DisplayName" : "q-biz-plugin",
+        #         "Type" : "CUSTOM"
+        #     }
+        # )
 
         # Create IAM roles
         batch_service_role = iam.Role(

@@ -7,7 +7,7 @@ app = cdk.App()
 AiAgentPipelineStack(app, "AiAgentPipelineStack",
     env=cdk.Environment(
         account=os.getenv('CDK_DEFAULT_ACCOUNT'),
-        region=os.getenv('CDK_DEFAULT_REGION')
+        region=app.node.try_get_context('region') or os.getenv('CDK_DEFAULT_REGION')
     )
 )
 
