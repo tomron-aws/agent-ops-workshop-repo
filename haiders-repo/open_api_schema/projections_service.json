@@ -1,0 +1,135 @@
+{
+    "openapi": "3.0.3",
+    "info": {
+        "title": "Projections_Service API",
+        "version": "1.0.0"
+    },
+    "servers": [
+        {
+            "url": "/"
+        }
+    ],
+    "paths": {
+        "/projections": {
+            "get": {
+                "summary": "GET /projections",
+                "description": "Get account value projections",
+                "operationId": "get_account_projection",
+                "parameters": [
+                    {
+                        "name": "account_value",
+                        "in": "query",
+                        "required": true,
+                        "description": "The initial account value to project future returns from",
+                        "schema": {
+                            "type": "number"
+                        }
+                    },
+                    {
+                        "name": "years",
+                        "in": "query",
+                        "required": true,
+                        "description": "The number of years to project the account value",
+                        "schema": {
+                            "type": "integer",
+                            "minimum": 1
+                        }
+                    },
+                    {
+                        "name": "growth_rate",
+                        "in": "query",
+                        "required": false,
+                        "description": "The annual growth rate as a decimal (e.g., 0.07 for 7%)",
+                        "schema": {
+                            "type": "number",
+                            "default": 0.07
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "projected_value": {
+                                            "type": "number"
+                                        },
+                                        "years": {
+                                            "type": "integer"
+                                        },
+                                        "growth_rate": {
+                                            "type": "number"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "components": {
+        "schemas": {
+            "HTTPValidationError": {
+                "properties": {
+                    "detail": {
+                        "items": {
+                            "$ref": "#/components/schemas/ValidationError"
+                        },
+                        "type": "array",
+                        "title": "Detail"
+                    }
+                },
+                "type": "object",
+                "title": "HTTPValidationError"
+            },
+            "ValidationError": {
+                "properties": {
+                    "loc": {
+                        "items": {
+                            "anyOf": [
+                                {
+                                    "type": "string"
+                                },
+                                {
+                                    "type": "integer"
+                                }
+                            ]
+                        },
+                        "type": "array",
+                        "title": "Location"
+                    },
+                    "msg": {
+                        "type": "string",
+                        "title": "Message"
+                    },
+                    "type": {
+                        "type": "string",
+                        "title": "Error Type"
+                    }
+                },
+                "type": "object",
+                "required": [
+                    "loc",
+                    "msg",
+                    "type"
+                ],
+                "title": "ValidationError"
+            }
+        }
+    }
+}

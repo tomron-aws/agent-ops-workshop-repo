@@ -1,5 +1,6 @@
 from constructs import Construct
 import os
+import json
 
 from aws_cdk import (
     Stack,
@@ -14,6 +15,8 @@ from aws_cdk import (
     aws_iam as iam,
     aws_ec2 as ec2,
     aws_s3_deployment as s3deploy,
+    aws_apigateway as aws_apigateway,
+    Token,
     Duration,
     RemovalPolicy,
     CfnResource,
@@ -24,6 +27,7 @@ from aws_cdk import (
 class AiAgentPipelineStack(Stack):
     def __init__(self, scope: Construct, construct_id: str, **kwargs) -> None:
         super().__init__(scope, construct_id, **kwargs)
+
         #parameters
         identity_center_arn = CfnParameter(
             self, "IdentityCenterArn",
@@ -101,9 +105,121 @@ class AiAgentPipelineStack(Stack):
             }
         )
 
+        bedrock_agent_functional_alias = CfnResource(
+            self, "TestAgentAlias",
+            type="AWS::Bedrock::AgentAlias",
+            properties={
+                "AgentId": bedrock_agent_test.ref,
+                "AgentAliasName": "latest"
+            }
+        )
+
+        # Create IAM role for Lambda with Bedrock permissions
+        bedrock_lambda_role = iam.Role(
+            self, 'BedrockLambdaRole',
+            assumed_by=iam.ServicePrincipal('lambda.amazonaws.com')
+        )
+
+        # Add Bedrock permissions
+        bedrock_lambda_role.add_to_policy(iam.PolicyStatement(
+            effect=iam.Effect.ALLOW,
+            actions=[
+                'bedrock:InvokeModel',
+                'bedrock:InvokeAgent'  # Add this permission
+            ],
+            resources=['*']
+        ))
+
+        # Basic Lambda CloudWatch permissions
+        bedrock_lambda_role.add_managed_policy(
+            iam.ManagedPolicy.from_aws_managed_policy_name('service-role/AWSLambdaBasicExecutionRole')
+        )
+
+        # Create Lambda function for Bedrock integration
+        bedrock_lambda = lambda_.Function(
+            self, 'BedrockLambdaFunction',
+            runtime=lambda_.Runtime.PYTHON_3_9,
+            handler='index.handler',
+            code=lambda_.Code.from_asset('lambda/tools'),
+            timeout=Duration.minutes(5),
+            memory_size=256,
+            role=bedrock_lambda_role,
+            environment={
+                'POWERTOOLS_SERVICE_NAME': 'bedrock-api',
+                'LOG_LEVEL': 'INFO',
+                'BEDROCK_AGENT_ID': bedrock_agent_functional.ref,
+                'BEDROCK_AGENT_ALIAS_ID': Token.as_string(bedrock_agent_functional_alias.get_att("AgentAliasId"))
+            }
+        )
+
         # Output the agent IDs
         CfnOutput(self, "FirstAgentId", value=bedrock_agent_test.ref)
         CfnOutput(self, "SecondAgentId", value=bedrock_agent_functional.ref)
+
+        api_resource_policy = iam.PolicyDocument(
+            statements=[
+                iam.PolicyStatement(
+                    effect=iam.Effect.ALLOW,
+                    principals=[iam.ServicePrincipal("qbusiness.amazonaws.com")],
+                    actions=["execute-api:Invoke"],
+                    resources=["execute-api:/*"],
+                    conditions={
+                        "StringEquals": {
+                            "aws:SourceAccount": Stack.of(self).account
+                        },
+                        "ArnLike": {
+                            "aws:SourceArn": f"arn:aws:qbusiness:{Stack.of(self).region}:{Stack.of(self).account}:*"
+                        }
+                    }
+                )
+            ]
+        )
+        # Create API Gateway REST API
+        api = aws_apigateway.RestApi(
+            self, 'BedrockApi',
+            rest_api_name='Bedrock Integration API',
+            description='API Gateway integration with Amazon Bedrock',
+            policy=api_resource_policy
+        )
+
+        # Create API Gateway integration with Lambda
+        integration = aws_apigateway.LambdaIntegration(
+            bedrock_lambda,
+            proxy=True,
+            integration_responses=[{
+                'statusCode': '200',
+                'responseParameters': {
+                    'method.response.header.Access-Control-Allow-Origin': "'*'"
+                }
+            }]
+        )
+
+        # Add POST method to API Gateway
+        api_resource = api.root.add_resource('invoke')
+        api_resource.add_method(
+            'POST',
+            integration,
+            method_responses=[{
+                'statusCode': '200',
+                'responseParameters': {
+                    'method.response.header.Access-Control-Allow-Origin': True
+                }
+            }]
+        )
+
+        # Enable CORS
+        api_resource.add_cors_preflight(
+            allow_origins=['*'],
+            allow_methods=['POST'],
+            allow_headers=['Content-Type', 'Authorization']
+        )
+
+        # Output the API endpoint URL
+        CfnOutput(
+            self, 'ApiEndpoint',
+            value=f'{api.url}invoke',
+            description='API Gateway endpoint URL'
+        )
 
         # Create IAM role for Amazon Q
         # q_service_role = iam.Role(
@@ -124,6 +240,16 @@ class AiAgentPipelineStack(Stack):
                 "DisplayName" : "AgentOps-QBiz-Instance",
                 "IdentityCenterInstanceArn" : identity_center_arn.value_as_string,
                 "RoleArn": "arn:aws:iam::239122513475:role/service-role/QBusiness-Application-9iqmk"
+            }
+        )
+
+        q_agent_import = CfnResource(
+            self, "AIAgentImport",
+            type="AWS::QBusiness::Application",
+            properties={
+                "DisplayName" : "Q-Demo-Application",
+                "IdentityCenterInstanceArn" : identity_center_arn.value_as_string,
+                "RoleArn": "arn:aws:iam::239122513475:role/aws-service-role/qbusiness.amazonaws.com/AWSServiceRoleForQBusiness"
             }
         )
 
@@ -224,6 +350,136 @@ class AiAgentPipelineStack(Stack):
                 }
             }
         )
+        new_q_agent_plugin = CfnResource(
+            self, "AIAgentPluginNew",
+            type="AWS::QBusiness::Plugin",
+            properties={
+                "ApplicationId" : q_agent.ref,
+                "AuthConfiguration" : {
+                    "NoAuthConfiguration": {}
+                },
+                "CustomPluginConfiguration" : {
+                    "ApiSchema" : {
+                        
+                        "Payload" : """{
+                            "openapi": "3.0.0",
+                            "info": {
+                                "title": "Bedrock Integration API",
+                                "description": "API Gateway integration with Amazon Bedrock",
+                                "version": "1.0.0"
+                            },
+                            "servers": [
+                                {
+                                    "url": "https://dqqw4javzd.execute-api.us-east-1.amazonaws.com/prod/invoke"
+                                }
+                            ],
+                            "paths": {
+                                "/invoke": {
+                                    "post": {
+                                        "summary": "Invoke Bedrock Agent",
+                                        "description": "Sends a prompt to the Bedrock agent and returns the agent's response",
+                                        "operationId": "invokeAgent",
+                                        "requestBody": {
+                                            "required": true,
+                                            "content": {
+                                                "application/json": {
+                                                    "schema": {
+                                                        "$ref": "#/components/schemas/InvokeRequest"
+                                                    }
+                                                }
+                                            }
+                                        },
+                                        "responses": {
+                                            "200": {
+                                                "description": "Successful response from the agent",
+                                                "content": {
+                                                    "application/json": {
+                                                        "schema": {
+                                                            "$ref": "#/components/schemas/InvokeResponse"
+                                                        }
+                                                    }
+                                                }
+                                            },
+                                            "400": {
+                                                "description": "Bad request - missing prompt",
+                                                "content": {
+                                                    "application/json": {
+                                                        "schema": {
+                                                            "$ref": "#/components/schemas/ErrorResponse"
+                                                        }
+                                                    }
+                                                }
+                                            },
+                                            "500": {
+                                                "description": "Internal server error",
+                                                "content": {
+                                                    "application/json": {
+                                                        "schema": {
+                                                            "$ref": "#/components/schemas/ErrorResponse"
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            },
+                            "components": {
+                                "schemas": {
+                                    "InvokeRequest": {
+                                        "type": "object",
+                                        "properties": {
+                                            "prompt": {
+                                                "type": "string",
+                                                "description": "The input text to send to the Bedrock agent"
+                                            },
+                                            "sessionId": {
+                                                "type": "string",
+                                                "description": "Optional session ID for the conversation (UUID will be generated if not provided)"
+                                            }
+                                        },
+                                        "required": ["prompt"]
+                                    },
+                                    "InvokeResponse": {
+                                        "type": "object",
+                                        "properties": {
+                                            "agentId": {
+                                                "type": "string",
+                                                "description": "The ID of the Bedrock agent that processed the request"
+                                            },
+                                            "response": {
+                                                "type": "string",
+                                                "description": "The agent's response to the prompt"
+                                            },
+                                            "sessionId": {
+                                                "type": "string",
+                                                "description": "The session ID for the conversation"
+                                            }
+                                        },
+                                        "required": ["agentId", "response", "sessionId"]
+                                    },
+                                    "ErrorResponse": {
+                                        "type": "object",
+                                        "properties": {
+                                            "error": {
+                                                "type": "string",
+                                                "description": "Error message describing what went wrong"
+                                            }
+                                        },
+                                        "required": ["error"]
+                                    }
+                                }
+                            }
+                            }"""
+                    },
+                    "ApiSchemaType" : "OPEN_API_V3",
+                    "Description" : "plugin description"
+                },
+                "DisplayName" : "new-q-biz-plugin",
+                "Type" : "CUSTOM"
+            }
+        )
+
         q_agent_plugin = CfnResource(
             self, "AIAgentPlugin",
             type="AWS::QBusiness::Plugin",
@@ -375,6 +631,157 @@ class AiAgentPipelineStack(Stack):
                 "Type" : "CUSTOM"
             }
         )
+        q_agent_plugin_import = CfnResource(
+            self, "AIAgentPluginImport",
+            type="AWS::QBusiness::Plugin",
+            properties={
+                "ApplicationId" : q_agent_import.ref,
+                "AuthConfiguration" : {
+                    "NoAuthConfiguration": {}
+                },
+                "CustomPluginConfiguration" : {
+                    "ApiSchema" : {
+                        
+                        "Payload" : """{
+                            "openapi": "3.0.0",
+                            "info": {
+                                "title": "FastAPI",
+                                "version": "0.1.0"
+                            },
+                            "servers": [
+                                {
+                                "url": "https://dj3a2w5zbcgq8.cloudfront.net"
+                                }
+                            ],
+                            "paths": {
+                                "/api/chat/": {
+                                "post": {
+                                    "tags": [
+                                    "chat_router"
+                                    ],
+                                    "summary": "Chat",
+                                    "description": "This API is used by a Financial Analyst  to provide clients' financial goals, stock information and S&P 500 and DOW Jones reqlated queries.The API interacts with SearchClient, ClientList, ClientDetail, StockInfo, Index_Tickers, GoalServicePopularGoals",
+                                    "operationId": "chat_api_chat__post",
+                                    "requestBody": {
+                                    "content": {
+                                        "application/json": {
+                                        "schema": {
+                                            "$ref": "#/components/schemas/ChatRequest"
+                                        }
+                                        }
+                                    },
+                                    "required": true
+                                    },
+                                    "responses": {
+                                    "200": {
+                                        "description": "Successful Response",
+                                        "content": {
+                                        "application/json": {
+                                            "schema": {
+                                            "$ref": "#/components/schemas/ChatResponse"
+                                            }
+                                        }
+                                        }
+                                    },
+                                    "422": {
+                                        "description": "Validation Error",
+                                        "content": {
+                                        "application/json": {
+                                            "schema": {
+                                            "$ref": "#/components/schemas/HTTPValidationError"
+                                            }
+                                        }
+                                        }
+                                    }
+                                    }
+                                }
+                                }
+                            },
+                            "components": {
+                                "schemas": {
+                                "ChatRequest": {
+                                    "type": "object",
+                                    "title": "ChatRequest",
+                                    "properties": {
+                                    "prompt": {
+                                        "type": "string",
+                                        "title": "Prompt"
+                                    }
+                                    },
+                                    "required": [
+                                    "prompt"
+                                    ]
+                                },
+                                "ChatResponse": {
+                                    "type": "object",
+                                    "title": "ChatResponse",
+                                    "properties": {
+                                    "response": {
+                                        "type": "string",
+                                        "title": "Response"
+                                    }
+                                    },
+                                    "required": [
+                                    "response"
+                                    ]
+                                },
+                                "HTTPValidationError": {
+                                    "type": "object",
+                                    "title": "HTTPValidationError",
+                                    "properties": {
+                                    "detail": {
+                                        "type": "array",
+                                        "title": "Detail",
+                                        "items": {
+                                        "$ref": "#/components/schemas/ValidationError"
+                                        }
+                                    }
+                                    }
+                                },
+                                "ValidationError": {
+                                    "type": "object",
+                                    "title": "ValidationError",
+                                    "properties": {
+                                    "loc": {
+                                        "type": "array",
+                                        "title": "Location",
+                                        "items": {
+                                        "anyOf": [
+                                            {
+                                            "type": "string"
+                                            },
+                                            {
+                                            "type": "integer"
+                                            }
+                                        ]
+                                        }
+                                    },
+                                    "msg": {
+                                        "type": "string",
+                                        "title": "Message"
+                                    },
+                                    "type": {
+                                        "type": "string",
+                                        "title": "Error Type"
+                                    }
+                                    },
+                                    "required": [
+                                    "loc",
+                                    "msg",
+                                    "type"
+                                    ]
+                                }
+                                }
+                            }
+                            }"""
+                    },
+                    "ApiSchemaType" : "OPEN_API_V3",
+                    "Description" : "plugin description"
+                },
+                "DisplayName" : "yfin-plugin",
+                "Type" : "CUSTOM"
+            }
+        )
 
         # Create IAM role for Q Business Web Experience
         web_experience_role = iam.Role(
@@ -455,6 +862,35 @@ class AiAgentPipelineStack(Stack):
                 "ApplicationId": q_agent.ref,
                 "RoleArn": web_experience_role.role_arn
             }
+        )
+
+        # Add these permissions to your existing web_experience_role
+        web_experience_role.add_to_policy(
+            iam.PolicyStatement(
+                effect=iam.Effect.ALLOW,
+                actions=[
+                    "qbusiness:InvokePlugin",
+                    "qbusiness:GetPlugin",
+                    "qbusiness:ListPlugins",
+                    "qbusiness:ListPluginActions"
+                ],
+                resources=[
+                    f"arn:aws:qbusiness:{Stack.of(self).region}:{Stack.of(self).account}:application/{q_agent.ref}/plugin/*"
+                ]
+            )
+        )
+
+        # Also add permissions for the API Gateway endpoint
+        web_experience_role.add_to_policy(
+            iam.PolicyStatement(
+                effect=iam.Effect.ALLOW,
+                actions=[
+                    "execute-api:Invoke"
+                ],
+                resources=[
+                    "*"
+                ]
+            )
         )
 
         # Create IAM roles
