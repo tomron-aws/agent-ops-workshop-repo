@@ -20,21 +20,25 @@ from aws_cdk import (
     CfnResource,
     CfnParameter,
     CfnOutput,
-    Token
+    Token,
+    Fn
 )
 
 class AiAgentPipelineStack(Stack):
     def __init__(self, scope: Construct, construct_id: str, **kwargs) -> None:
         super().__init__(scope, construct_id, **kwargs)
-        #parameters
-        identity_center_arn = CfnParameter(
-            self, "IdentityCenterArn",
-            type="String",
-            description="The ARN of the IAM Identity Center instance",
-            default="",  # Empty string as default value
-            allowed_pattern="^$|^arn:[\\w-]+:sso:::instance/(sso)?ins-[a-zA-Z0-9-.]{16}$",  # Allows empty string or valid IAM Identity Center ARN
-            constraint_description="Must be a valid IAM Identity Center instance ARN or empty string"
-        )
+        #parameters - For an extra challenge set up the ApplicationId as a parameter
+        # identity_center_arn = CfnParameter(
+        #     self, "IdentityCenterArn",
+        #     type="String",
+        #     description="The ARN of the IAM Identity Center instance",
+        #     default="",  # Empty string as default value
+        #     allowed_pattern="^$|^arn:[\\w-]+:sso:::instance/(sso)?ins-[a-zA-Z0-9-.]{16}$",  # Allows empty string or valid IAM Identity Center ARN
+        #     constraint_description="Must be a valid IAM Identity Center instance ARN or empty string"
+        # )
+
+        # app_id = Fn.import_value("QBusinessApp") - Uncomment for an extra challenge
+        app_id = "<your Q App Id>"
 
         __dirname = os.path.dirname(os.path.realpath(__file__))
 
@@ -97,59 +101,8 @@ class AiAgentPipelineStack(Stack):
                 "AgentName": "ElectronicsManufacturingExpert",
                 "AgentResourceRoleArn": agent_role.role_arn,
                 "FoundationModel": "anthropic.claude-3-sonnet-20240229-v1:0",
-                "Instruction": """You are an Electronics Manufacturing Expert Agent specializing in electronic component manufacturing, assembly processes, and quality control. 
-
-                    Core Knowledge Areas:
-
-                    1. Manufacturing Processes:
-                    - PCB fabrication and assembly techniques
-                    - Surface-mount technology (SMT) and through-hole assembly
-                    - Soldering standards and best practices
-                    - Clean room protocols and requirements
-                    - Production line optimization
-
-                    2. Electronic Components:
-                    - Component specifications and tolerances
-                    - Parts selection and compatibility
-                    - Component lifecycle management
-                    - Inventory control best practices
-                    - Component obsolescence management
-
-                    3. Quality Control:
-                    - IPC standards implementation
-                    - Testing procedures (ICT, FCT, AOI)
-                    - Defect analysis and prevention
-                    - Statistical process control (SPC)
-                    - Reliability testing methods
-
-                    4. Industry Standards:
-                    - IPC standards (IPC-A-610, IPC-J-STD-001)
-                    - ISO 9001 requirements
-                    - ESD protection protocols
-                    - RoHS and REACH compliance
-                    - Industry 4.0 implementation
-
-                    Response Guidelines:
-                    - Provide specific technical details and parameters when discussing processes
-                    - Include relevant industry standards and compliance requirements
-                    - Emphasize quality control checkpoints and testing procedures
-                    - Consider manufacturability and scalability in recommendations
-                    - Reference appropriate safety protocols and environmental compliance
-
-                    When responding to queries:
-                    1. First assess the specific manufacturing context
-                    2. Consider applicable industry standards
-                    3. Provide detailed technical specifications
-                    4. Include quality control requirements
-                    5. Note any relevant compliance considerations
-
-                    Always maintain focus on:
-                    - Manufacturing quality and reliability
-                    - Process efficiency and optimization
-                    - Industry standard compliance
-                    - Safety and environmental regulations
-                    - Cost-effective solutions while maintaining quality standards""",
-                "Description": "Expert system for electronics manufacturing processes, quality control, and industry standards compliance",
+                "Instruction": """You are a bedrock agent that answers general questions""",
+                "Description": "General Question Agent",
                 "IdleSessionTTLInSeconds": 1800
             }
         )
@@ -208,8 +161,7 @@ class AiAgentPipelineStack(Stack):
         # api = aws_apigateway.RestApi(
         #     self, 'BedrockApi',
         #     rest_api_name='Bedrock Integration API',
-        #     description='API Gateway integration with Amazon Bedrock',
-        #     # policy=api_resource_policy
+        #     description='API Gateway integration with Amazon Bedrock'
         # )
 
         # Create API Gateway integration with Lambda - Leave commented until ready to use
@@ -249,165 +201,6 @@ class AiAgentPipelineStack(Stack):
         #     self, 'ApiEndpoint',
         #     value=f'{api.url}invoke',
         #     description='API Gateway endpoint URL'
-        # )
-
-        #Import Amazon Q
-        
-        # Import Amazon Q Agent
-        #ToDo: We will eventualy need to create a role for this as the default can't be edited
-
-
-        
-        # q_agent_plugin = CfnResource(
-        #     self, "AIAgentPlugin",
-        #     type="AWS::QBusiness::Plugin",
-        #     properties={
-        #         "ApplicationId" : q_agent.ref,
-        #         "AuthConfiguration" : {
-        #             "NoAuthConfiguration": {}
-        #         },
-        #         "CustomPluginConfiguration" : {
-        #             "ApiSchema" : {
-                        
-        #                 "Payload" : """{
-        #                     "openapi": "3.0.0",
-        #                     "info": {
-        #                         "title": "FastAPI",
-        #                         "version": "0.1.0"
-        #                     },
-        #                     "servers": [
-        #                         {
-        #                         "url": "https://dj3a2w5zbcgq8.cloudfront.net"
-        #                         }
-        #                     ],
-        #                     "paths": {
-        #                         "/api/chat/": {
-        #                         "post": {
-        #                             "tags": [
-        #                             "chat_router"
-        #                             ],
-        #                             "summary": "Chat",
-        #                             "description": "This API is used by a Financial Analyst  to provide clients' financial goals, stock information and S&P 500 and DOW Jones reqlated queries.The API interacts with SearchClient, ClientList, ClientDetail, StockInfo, Index_Tickers, GoalServicePopularGoals",
-        #                             "operationId": "chat_api_chat__post",
-        #                             "requestBody": {
-        #                             "content": {
-        #                                 "application/json": {
-        #                                 "schema": {
-        #                                     "$ref": "#/components/schemas/ChatRequest"
-        #                                 }
-        #                                 }
-        #                             },
-        #                             "required": true
-        #                             },
-        #                             "responses": {
-        #                             "200": {
-        #                                 "description": "Successful Response",
-        #                                 "content": {
-        #                                 "application/json": {
-        #                                     "schema": {
-        #                                     "$ref": "#/components/schemas/ChatResponse"
-        #                                     }
-        #                                 }
-        #                                 }
-        #                             },
-        #                             "422": {
-        #                                 "description": "Validation Error",
-        #                                 "content": {
-        #                                 "application/json": {
-        #                                     "schema": {
-        #                                     "$ref": "#/components/schemas/HTTPValidationError"
-        #                                     }
-        #                                 }
-        #                                 }
-        #                             }
-        #                             }
-        #                         }
-        #                         }
-        #                     },
-        #                     "components": {
-        #                         "schemas": {
-        #                         "ChatRequest": {
-        #                             "type": "object",
-        #                             "title": "ChatRequest",
-        #                             "properties": {
-        #                             "prompt": {
-        #                                 "type": "string",
-        #                                 "title": "Prompt"
-        #                             }
-        #                             },
-        #                             "required": [
-        #                             "prompt"
-        #                             ]
-        #                         },
-        #                         "ChatResponse": {
-        #                             "type": "object",
-        #                             "title": "ChatResponse",
-        #                             "properties": {
-        #                             "response": {
-        #                                 "type": "string",
-        #                                 "title": "Response"
-        #                             }
-        #                             },
-        #                             "required": [
-        #                             "response"
-        #                             ]
-        #                         },
-        #                         "HTTPValidationError": {
-        #                             "type": "object",
-        #                             "title": "HTTPValidationError",
-        #                             "properties": {
-        #                             "detail": {
-        #                                 "type": "array",
-        #                                 "title": "Detail",
-        #                                 "items": {
-        #                                 "$ref": "#/components/schemas/ValidationError"
-        #                                 }
-        #                             }
-        #                             }
-        #                         },
-        #                         "ValidationError": {
-        #                             "type": "object",
-        #                             "title": "ValidationError",
-        #                             "properties": {
-        #                             "loc": {
-        #                                 "type": "array",
-        #                                 "title": "Location",
-        #                                 "items": {
-        #                                 "anyOf": [
-        #                                     {
-        #                                     "type": "string"
-        #                                     },
-        #                                     {
-        #                                     "type": "integer"
-        #                                     }
-        #                                 ]
-        #                                 }
-        #                             },
-        #                             "msg": {
-        #                                 "type": "string",
-        #                                 "title": "Message"
-        #                             },
-        #                             "type": {
-        #                                 "type": "string",
-        #                                 "title": "Error Type"
-        #                             }
-        #                             },
-        #                             "required": [
-        #                             "loc",
-        #                             "msg",
-        #                             "type"
-        #                             ]
-        #                         }
-        #                         }
-        #                     }
-        #                     }"""
-        #             },
-        #             "ApiSchemaType" : "OPEN_API_V3",
-        #             "Description" : "plugin description"
-        #         },
-        #         "DisplayName" : "q-biz-plugin",
-        #         "Type" : "CUSTOM"
-        #     }
         # )
 
         # Create IAM roles
